@@ -286,3 +286,55 @@ test('a cached importer is re-transformed after a dependency outside the root is
     }
   `)
 })
+
+// Import analysis keeps an import it cannot resolve as written. Resolving that
+// relative url from the root instead of the importer finds nothing again, so
+// the stale entry kept failing after the missing file was created.
+test('a cached importer is re-transformed after its unresolved dynamic import is created', async () => {
+  const fs = useTmpFS(
+    {
+      'app/package.json': JSON.stringify({ name: 'app', type: 'module' }),
+      'app/vitest.config.mjs': /* js */ `
+        export default {
+          test: {
+            fsModuleCache: true,
+            fsModuleCachePath: './node_modules/.vitest-fs-cache',
+          },
+        }
+      `,
+      'app/src/a.test.ts': /* ts */ `
+        import { expect, it } from 'vitest'
+        it('reads it', async () => {
+          const { value } = await import('../../shared/value.js')
+          expect(value).toBe(1)
+        })
+      `,
+    },
+    false,
+  )
+  const root = join(fs.root, 'app')
+
+  const cold = await runVitest({ root })
+  expect(cold.errorTree()).toMatchInlineSnapshot(`
+    {
+      "src/a.test.ts": {
+        "reads it": [
+          "Cannot find module '/shared/value.js' imported from <root>/src/a.test.ts",
+        ],
+      },
+    }
+  `)
+  await cold.ctx?.close()
+
+  fs.createFile('shared/value.js', `export const value = 1`)
+
+  const warm = await runVitest({ root })
+  expect(warm.stderr).toBe('')
+  expect(warm.errorTree()).toMatchInlineSnapshot(`
+    {
+      "src/a.test.ts": {
+        "reads it": "passed",
+      },
+    }
+  `)
+})

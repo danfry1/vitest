@@ -426,7 +426,20 @@ export class ModuleTransformService {
     const importedModules = await Promise.all(
       urls.map(async (url) => {
         const id = Object.hasOwn(ids, url) ? ids[url] : urlToId(environment, url)
-        const moduleNode = await environment.moduleGraph.ensureEntryFromUrl(url).catch(() => null)
+        // import analysis keeps an unresolved import as written, so a relative
+        // url has to be resolved from the importer, like `fetch` does
+        let resolvedUrl = url
+        if (url[0] !== '/') {
+          const resolved = await environment.pluginContainer
+            .resolveId(url, cachedModule.id)
+            .catch(() => null)
+          if (resolved) {
+            resolvedUrl = normalizeResolvedIdToUrl(environment, resolved.id)
+          }
+        }
+        const moduleNode = await environment.moduleGraph
+          .ensureEntryFromUrl(resolvedUrl)
+          .catch(() => null)
         const stale =
           !moduleNode ||
           moduleNode.id !== id ||
